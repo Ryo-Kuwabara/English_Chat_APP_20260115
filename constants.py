@@ -1,13 +1,11 @@
 APP_NAME = "生成AI英会話アプリ"
 MODE_1 = "日常英会話"
 MODE_2 = "シャドーイング"
-MODE_3 = "ディクテーション"
 USER_ICON_PATH = "images/user_icon.jpg"
 AI_ICON_PATH = "images/ai_icon.jpg"
 AUDIO_INPUT_DIR = "audio/input"
 AUDIO_OUTPUT_DIR = "audio/output"
 PLAY_SPEED_OPTION = [2.0, 1.5, 1.2, 1.0, 0.8, 0.6]
-ENGLISH_LEVEL_OPTION = ["初級者", "中級者", "上級者"]
 
 # 英語講師として自由な会話をさせ、文法間違いをさりげなく訂正させるプロンプト
 SYSTEM_TEMPLATE_BASIC_CONVERSATION = """

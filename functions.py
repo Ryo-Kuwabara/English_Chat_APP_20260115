@@ -5,7 +5,7 @@ from pathlib import Path
 import wave
 import pyaudio
 from pydub import AudioSegment
-from audiorecorder import audiorecorder
+from audio_recorder_streamlit import audio_recorder
 import numpy as np
 from scipy.io.wavfile import write
 from langchain.prompts import (
@@ -19,24 +19,97 @@ from langchain_openai import ChatOpenAI
 from langchain.chains import ConversationChain
 import constants as ct
 
-def record_audio(audio_input_file_path):
+def record_audio_simple(key_suffix=""):
     """
-    音声入力を受け取って音声ファイルを作成
+    シンプルな音声録音機能
+    Args:
+        key_suffix: キーの接尾辞（重複を避けるため）
+    Returns:
+        audio_data: 録音された音声データ（BytesIOオブジェクト）、またはNone
     """
-
-    audio = audiorecorder(
-        start_prompt="発話開始",
-        pause_prompt="やり直す",
-        stop_prompt="発話終了",
-        start_style={"color":"white", "background-color":"black"},
-        pause_style={"color":"gray", "background-color":"white"},
-        stop_style={"color":"white", "background-color":"black"}
-    )
-
-    if len(audio) > 0:
-        audio.export(audio_input_file_path, format="wav")
+    
+    # シンプルなキー管理（重複回避）
+    recorder_key = f"main_recorder_{key_suffix}" if key_suffix else "main_recorder"
+    
+    # グローバルマイクアクセス許可の管理
+    if "global_microphone_permission" not in st.session_state:
+        st.session_state["global_microphone_permission"] = False
+    
+    # 処理中かどうかに応じてヒントテキストを変更
+    if st.session_state.get("current_step", "waiting") == "processing":
+        button_text = "⏳ 処理中..."
+        is_disabled = True
     else:
-        st.stop()
+        if not st.session_state["global_microphone_permission"]:
+            button_text = "🎤 マイクアクセス許可 (初回のみ)"
+        else:
+            button_text = "🎤 録音開始 / 🛑 録音停止"
+        is_disabled = False
+    
+    # 録音コンポーネントを表示（常に同じキーを使用）
+    if not is_disabled:
+        audio_data = audio_recorder(
+            text=button_text,
+            recording_color="#e8b62c",
+            neutral_color="#6aa36f", 
+            icon_name="microphone-lines",
+            icon_size="2x",
+            key=recorder_key,  # シンプルなキー管理
+            energy_threshold=(-1.0, 1.0),
+            pause_threshold=300.0,  # 5分間（実質的に自動停止を無効化）
+            sample_rate=41_000
+        )
+    else:
+        # 処理中は無効化されたコンポーネントを表示
+        st.info("⏳ 音声処理中です... 完了までお待ちください")
+        audio_data = None
+    
+    # マイクアクセス許可の状態管理
+    if audio_data is not None and not st.session_state["global_microphone_permission"]:
+        st.session_state["global_microphone_permission"] = True
+        st.success("✅ マイクアクセスが許可されました！2回目以降は許可不要です。")
+    
+    return audio_data
+
+def save_audio_to_file(audio_data, file_path):
+    """
+    音声データをファイルに保存
+    Args:
+        audio_data: audio_recorderから取得した音声データ
+        file_path: 保存先ファイルパス
+    Returns:
+        bool: 保存成功の場合True、失敗の場合False
+    """
+    try:
+        if audio_data is not None and len(audio_data) > 0:
+            # audio_recorderはbytesオブジェクトを返すので、BytesIOに変換
+            from io import BytesIO
+            from pydub import AudioSegment
+            
+            # bytesデータをBytesIOオブジェクトに変換
+            audio_bytes = BytesIO(audio_data)
+            
+            # AudioSegmentで読み込み
+            audio_segment = AudioSegment.from_file(audio_bytes)
+            
+            # 音声の長さをチェック（0.1秒未満の場合は拒否）
+            duration_ms = len(audio_segment)
+            duration_seconds = duration_ms / 1000.0
+            
+            if duration_seconds < 0.1:
+                st.error(f"録音時間が短すぎます（{duration_seconds:.2f}秒）。最低0.1秒以上録音してください。")
+                return False
+            
+            # WAVファイルとして保存
+            audio_segment.export(file_path, format="wav")
+            
+            return True
+        else:
+            st.error("録音データが空です。もう一度録音してください。")
+            return False
+    except Exception as e:
+        st.error(f"音声ファイル保存エラー: {e}")
+        return False
 
 def transcribe_audio(audio_input_file_path):
     """
@@ -44,18 +117,22 @@ def transcribe_audio(audio_input_file_path):
     Args:
         audio_input_file_path: 音声入力ファイルのパス
     """
-
-    with open(audio_input_file_path, 'rb') as audio_input_file:
-        transcript = st.session_state.openai_obj.audio.transcriptions.create(
-            model="whisper-1",
-            file=audio_input_file,
-            language="en"
-        )
-    
-    # 音声入力ファイルを削除
-    os.remove(audio_input_file_path)
-
-    return transcript
+    try:
+        with open(audio_input_file_path, 'rb') as audio_input_file:
+            transcript = st.session_state.openai_obj.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_input_file,
+                language="en"
+            )
+        
+        return transcript
+    except Exception as e:
+        st.error(f"音声認識エラー: {e}")
+        raise e
+    finally:
+        # ファイルが存在する場合のみ削除
+        if os.path.exists(audio_input_file_path):
+            os.remove(audio_input_file_path)
 
 def save_to_wav(llm_response_audio, audio_output_file_path):
     """
@@ -174,3 +251,209 @@ def create_evaluation():
     llm_response_evaluation = st.session_state.chain_evaluation.predict(input="")
 
     return llm_response_evaluation
+
+def play_audio_direct(audio_file_path, speed=1.0):
+    """
+    音声ファイルを直接再生（同期的、確実な再生）
+    Args:
+        audio_file_path: 音声ファイルのパス
+        speed: 再生速度
+    """
+    try:
+        import wave
+        import pyaudio
+        from pydub import AudioSegment
+        
+        print(f"[DEBUG] 音声再生開始: {audio_file_path}")
+        
+        # ファイル存在確認
+        if not os.path.exists(audio_file_path):
+            raise FileNotFoundError(f"音声ファイルが見つかりません: {audio_file_path}")
+        
+        # 音声ファイルの読み込み
+        audio = AudioSegment.from_wav(audio_file_path)
+        print(f"[DEBUG] 音声ファイル読み込み完了: 長さ={len(audio)}ms")
+        
+        # 速度調整
+        playback_file = audio_file_path
+        if speed != 1.0:
+            modified_audio = audio._spawn(
+                audio.raw_data, 
+                overrides={"frame_rate": int(audio.frame_rate * speed)}
+            )
+            modified_audio = modified_audio.set_frame_rate(audio.frame_rate)
+            temp_path = audio_file_path.replace('.wav', f'_temp_speed_{int(time.time())}.wav')
+            modified_audio.export(temp_path, format="wav")
+            playback_file = temp_path
+            print(f"[DEBUG] 速度調整完了: {speed}x")
+
+        # PyAudioで再生
+        print(f"[DEBUG] PyAudio再生開始")
+        with wave.open(playback_file, 'rb') as wf:
+            p = pyaudio.PyAudio()
+            
+            # オーディオストリーム作成
+            stream = p.open(
+                format=p.get_format_from_width(wf.getsampwidth()),
+                channels=wf.getnchannels(),
+                rate=wf.getframerate(),
+                output=True,
+                frames_per_buffer=1024
+            )
+            
+            # 音声データを読み込んで再生
+            chunk_size = 1024
+            data = wf.readframes(chunk_size)
+            
+            while data:
+                stream.write(data)
+                data = wf.readframes(chunk_size)
+            
+            # リソース解放
+            stream.stop_stream()
+            stream.close()
+            p.terminate()
+            
+        print(f"[DEBUG] PyAudio再生完了")
+            
+        # テンポラリファイルがあれば削除
+        if speed != 1.0 and os.path.exists(temp_path):
+            os.remove(temp_path)
+            
+        return True
+            
+    except Exception as e:
+        print(f"[ERROR] Direct audio play error: {e}")
+        # Streamlitエラー表示
+        if 'st' in globals():
+            st.error(f"音声再生エラー: {e}")
+        return False
+
+def encode_audio_to_base64(audio_file_path):
+    """
+    音声ファイルをBase64エンコードして返す
+    Args:
+        audio_file_path: 音声ファイルのパス
+    Returns:
+        str: Base64エンコードされた音声データ
+    """
+    import base64
+    try:
+        with open(audio_file_path, 'rb') as audio_file:
+            audio_data = audio_file.read()
+            base64_audio = base64.b64encode(audio_data).decode('utf-8')
+            return base64_audio
+    except Exception as e:
+        st.error(f"音声エンコードエラー: {e}")
+        return ""
+
+def save_for_replay(audio_output_file_path):
+    """
+    再読み上げ用にファイルを保存
+    Args:
+        audio_output_file_path: 元の音声ファイルのパス
+    """
+    try:
+        # 再読み上げ用にファイルを保存
+        saved_audio_path = audio_output_file_path.replace('.wav', '_saved.wav')
+        audio = AudioSegment.from_wav(audio_output_file_path)
+        audio.export(saved_audio_path, format="wav")
+        
+        # 元のファイルを削除
+        if os.path.exists(audio_output_file_path):
+            os.remove(audio_output_file_path)
+            
+    except Exception as e:
+        st.error(f"音声ファイル保存エラー: {e}")
+
+def play_and_save_wav(audio_output_file_path, speed=1.0):
+    """
+    音声ファイルの読み上げと再読み上げ用に保存
+    Args:
+        audio_output_file_path: 音声ファイルのパス
+        speed: 再生速度（1.0が通常速度、0.5で半分の速さ、2.0で倍速など）
+    """
+
+    # 音声ファイルの読み込み
+    audio = AudioSegment.from_wav(audio_output_file_path)
+    
+    # 速度を変更
+    if speed != 1.0:
+        # frame_rateを変更することで速度を調整
+        modified_audio = audio._spawn(
+            audio.raw_data, 
+            overrides={"frame_rate": int(audio.frame_rate * speed)}
+        )
+        # 元のframe_rateに戻すことで正常再生させる（ピッチを保持したまま速度だけ変更）
+        modified_audio = modified_audio.set_frame_rate(audio.frame_rate)
+
+        modified_audio.export(audio_output_file_path, format="wav")
+
+    # 再読み上げ用にファイルを保存（元のファイルをコピー）
+    saved_audio_path = audio_output_file_path.replace('.wav', '_saved.wav')
+    audio_for_save = AudioSegment.from_wav(audio_output_file_path)
+    audio_for_save.export(saved_audio_path, format="wav")
+
+    # PyAudioによる再生をStreamlitの音声再生に変更
+    try:
+        # Streamlitの音声再生機能を使用（非ブロッキング）
+        st.audio(audio_output_file_path, format="audio/wav", autoplay=True)
+    except Exception as e:
+        st.error(f"音声再生エラー: {e}")
+    
+    # 元の音声ファイルを削除（保存用は残す）
+    if os.path.exists(audio_output_file_path):
+        try:
+            os.remove(audio_output_file_path)
+        except:
+            pass  # ファイルが使用中の場合はスキップ
+
+def play_saved_audio(saved_audio_path, speed=1.0):
+    """
+    保存された音声ファイルを再生
+    Args:
+        saved_audio_path: 保存された音声ファイルのパス
+        speed: 再生速度（1.0が通常速度、0.5で半分の速さ、2.0で倍速など）
+    """
+    try:
+        if not os.path.exists(saved_audio_path):
+            st.error("音声ファイルが見つかりません")
+            return
+
+        # 音声ファイルの読み込み
+        audio = AudioSegment.from_wav(saved_audio_path)
+        
+        # 一時的な再生用ファイルを作成
+        temp_play_path = saved_audio_path.replace('_saved.wav', f'_temp_play_{int(time.time())}.wav')
+        
+        # 速度を変更
+        if speed != 1.0:
+            # frame_rateを変更することで速度を調整
+            modified_audio = audio._spawn(
+                audio.raw_data, 
+                overrides={"frame_rate": int(audio.frame_rate * speed)}
+            )
+            # 元のframe_rateに戻すことで正常再生させる（ピッチを保持したまま速度だけ変更）
+            modified_audio = modified_audio.set_frame_rate(audio.frame_rate)
+            modified_audio.export(temp_play_path, format="wav")
+        else:
+            # 速度変更がない場合は元のファイルをコピー
+            audio.export(temp_play_path, format="wav")
+
+        # Streamlitの音声再生機能を使用
+        st.audio(temp_play_path, format="audio/wav", autoplay=True)
+        
+        # 少し待ってから一時ファイルを削除
+        import threading
+        def delayed_cleanup():
+            time.sleep(2)
+            if os.path.exists(temp_play_path):
+                try:
+                    os.remove(temp_play_path)
+                except:
+                    pass
+        
+        threading.Thread(target=delayed_cleanup, daemon=True).start()
+        
+    except Exception as e:
+        st.error(f"音声再生エラー: {e}")
