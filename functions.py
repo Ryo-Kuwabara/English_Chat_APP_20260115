@@ -252,6 +252,68 @@ def create_evaluation():
 
     return llm_response_evaluation
 
+def play_audio_web_compatible(audio_file_path, speed=1.0):
+    """
+    Webアプリ対応の音声再生（ブラウザ側再生）
+    - localhost/クラウド環境の両方で動作
+    - ブラウザの音声コントロールを使用
+    """
+    try:
+        print(f"[WEB] ブラウザ音声再生開始: {audio_file_path}")
+        
+        # ファイル存在確認
+        if not os.path.exists(audio_file_path):
+            print(f"[ERROR] 音声ファイルが見つかりません: {audio_file_path}")
+            return False
+        
+        # 速度調整が必要な場合は事前に処理
+        playback_file = audio_file_path
+        if speed != 1.0:
+            from pydub import AudioSegment
+            import time
+            
+            print(f"[WEB] 速度調整処理: {speed}x")
+            audio = AudioSegment.from_wav(audio_file_path)
+            modified_audio = audio._spawn(
+                audio.raw_data, 
+                overrides={"frame_rate": int(audio.frame_rate * speed)}
+            )
+            modified_audio = modified_audio.set_frame_rate(audio.frame_rate)
+            
+            # 一時ファイル作成
+            temp_path = audio_file_path.replace('.wav', f'_web_temp_{int(time.time())}.wav')
+            modified_audio.export(temp_path, format="wav")
+            playback_file = temp_path
+        
+        # Streamlitのst.audioでブラウザ再生
+        import streamlit as st
+        
+        # 音声コントロール付きで表示
+        st.audio(playback_file, format="audio/wav")
+        
+        # 一時ファイルがあれば遅延削除
+        if speed != 1.0 and playback_file != audio_file_path:
+            import threading
+            def delayed_cleanup():
+                time.sleep(10)  # 10秒後に削除
+                if os.path.exists(playback_file):
+                    try:
+                        os.remove(playback_file)
+                        print(f"[WEB] 一時ファイル削除完了: {playback_file}")
+                    except:
+                        pass
+            
+            threading.Thread(target=delayed_cleanup, daemon=True).start()
+        
+        print(f"[WEB] ブラウザ音声再生設定完了")
+        return True
+        
+    except Exception as e:
+        print(f"[ERROR] Web音声再生エラー: {e}")
+        if 'st' in globals():
+            st.error(f"音声再生エラー: {e}")
+        return False
+
 def play_audio_direct(audio_file_path, speed=1.0):
     """
     音声ファイルを直接再生（同期的、確実な再生）- macOS対応強化版

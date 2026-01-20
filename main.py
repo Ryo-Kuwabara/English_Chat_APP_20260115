@@ -117,7 +117,7 @@ if st.session_state.messages:
                         # 各メッセージ用の一意なキーを生成
                         replay_key = f"replay_latest_{actual_idx}"
                         if st.button("🔊 再読み上げ", key=replay_key, use_container_width=True):
-                            success = ft.play_audio_direct(message["audio_path"])
+                            success = ft.play_audio_web_compatible(message["audio_path"], st.session_state.speed)
                             if success:
                                 st.toast("音声を再生しました", icon="🔊")
                             else:
@@ -208,18 +208,16 @@ if st.session_state.current_step == "processing" and st.session_state.recorded_a
                     st.markdown(llm_response)
                     st.info("🔊 音声を自動再生中...")
                 
-                # 最優先でPyAudio直接再生（確実な自動再生）
-                with st.spinner('音声再生中...'):
-                    print(f"[MAIN] 音声再生開始: {audio_output_file_path}")
-                    success = ft.play_audio_direct(audio_output_file_path, st.session_state.speed)
-                    print(f"[MAIN] 音声再生結果: {success}")
-                    
+                # Web標準のブラウザ音声再生（localhost/クラウド両対応）
+                print(f"[MAIN] Web音声再生開始: {audio_output_file_path}")
+                
+                # ブラウザでの音声再生
+                success = ft.play_audio_web_compatible(audio_output_file_path, st.session_state.speed)
+                
                 if success:
-                    st.success("✅ 音声再生完了")
+                    st.success("🔊 音声再生完了（ブラウザ再生）")
                 else:
-                    st.warning("⚠️ 直接再生に失敗しました。ブラウザ再生を試します...")
-                    # エラー時のフォールバック - ブラウザでの再生
-                    st.audio(audio_output_file_path, format="audio/wav")
+                    st.error("❌ 音声再生に失敗しました")
                 
                 # 再読み上げ用ファイルを保存（一意なファイル名で）
                 timestamp = int(time.time())
@@ -284,7 +282,7 @@ if len(st.session_state.messages) > 2:
                 # 再読み上げボタン
                 if "audio_path" in message and message["audio_path"] and os.path.exists(message["audio_path"]):
                     if st.button("🔊 再読み上げ", key=f"history_replay_{idx}", use_container_width=True):
-                        success = ft.play_audio_direct(message["audio_path"])
+                        success = ft.play_audio_web_compatible(message["audio_path"], st.session_state.speed)
                         if success:
                             st.toast("音声を再生しました", icon="🔊")
                         else:
