@@ -117,8 +117,11 @@ if st.session_state.messages:
                         # 各メッセージ用の一意なキーを生成
                         replay_key = f"replay_latest_{actual_idx}"
                         if st.button("🔊 再読み上げ", key=replay_key, use_container_width=True):
-                            ft.play_audio_direct(message["audio_path"])
-                            st.toast("音声を再生しました", icon="🔊")
+                            success = ft.play_audio_direct(message["audio_path"])
+                            if success:
+                                st.toast("音声を再生しました", icon="🔊")
+                            else:
+                                st.toast("音声再生に失敗しました", icon="❌")
         elif message["role"] == "user":
             with st.chat_message(message["role"], avatar="images/user_icon.jpg"):
                 st.markdown(message["content"])
@@ -206,12 +209,12 @@ if st.session_state.current_step == "processing" and st.session_state.recorded_a
                     st.info("🔊 音声を自動再生中...")
                 
                 # 最優先でPyAudio直接再生（確実な自動再生）
-                try:
-                    with st.spinner('音声再生中...'):
-                        ft.play_audio_direct(audio_output_file_path, st.session_state.speed)
-                except Exception as e:
-                    st.error(f"音声再生エラー: {e}")
-                    # エラー時のフォールバック
+                with st.spinner('音声再生中...'):
+                    success = ft.play_audio_direct(audio_output_file_path, st.session_state.speed)
+                    
+                if not success:
+                    st.warning("直接再生に失敗しました。ブラウザ再生を試します...")
+                    # エラー時のフォールバック - ブラウザでの再生
                     st.audio(audio_output_file_path, format="audio/wav")
                 
                 # 再読み上げ用ファイルを保存（一意なファイル名で）
@@ -277,8 +280,11 @@ if len(st.session_state.messages) > 2:
                 # 再読み上げボタン
                 if "audio_path" in message and message["audio_path"] and os.path.exists(message["audio_path"]):
                     if st.button("🔊 再読み上げ", key=f"history_replay_{idx}", use_container_width=True):
-                        ft.play_audio_direct(message["audio_path"])
-                        st.toast("音声を再生しました", icon="🔊")
+                        success = ft.play_audio_direct(message["audio_path"])
+                        if success:
+                            st.toast("音声を再生しました", icon="🔊")
+                        else:
+                            st.toast("音声再生に失敗しました", icon="❌")
                 else:
                     st.caption("⚠️ 音声ファイルが利用できません")
         elif message["role"] == "user":

@@ -254,7 +254,7 @@ def create_evaluation():
 
 def play_audio_direct(audio_file_path, speed=1.0):
     """
-    音声ファイルを直接再生（同期的、確実な再生）
+    音声ファイルを直接再生（同期的、確実な再生）- macOS対応強化版
     Args:
         audio_file_path: 音声ファイルのパス
         speed: 再生速度
@@ -263,6 +263,8 @@ def play_audio_direct(audio_file_path, speed=1.0):
         import wave
         import pyaudio
         from pydub import AudioSegment
+        import subprocess
+        import platform
         
         print(f"[DEBUG] 音声再生開始: {audio_file_path}")
         
@@ -276,6 +278,7 @@ def play_audio_direct(audio_file_path, speed=1.0):
         
         # 速度調整
         playback_file = audio_file_path
+        temp_path = None
         if speed != 1.0:
             modified_audio = audio._spawn(
                 audio.raw_data, 
@@ -287,40 +290,96 @@ def play_audio_direct(audio_file_path, speed=1.0):
             playback_file = temp_path
             print(f"[DEBUG] 速度調整完了: {speed}x")
 
-        # PyAudioで再生
-        print(f"[DEBUG] PyAudio再生開始")
-        with wave.open(playback_file, 'rb') as wf:
-            p = pyaudio.PyAudio()
-            
-            # オーディオストリーム作成
-            stream = p.open(
-                format=p.get_format_from_width(wf.getsampwidth()),
-                channels=wf.getnchannels(),
-                rate=wf.getframerate(),
-                output=True,
-                frames_per_buffer=1024
-            )
-            
-            # 音声データを読み込んで再生
-            chunk_size = 1024
-            data = wf.readframes(chunk_size)
-            
-            while data:
-                stream.write(data)
+        # PyAudioで再生を試行
+        try:
+            print(f"[DEBUG] PyAudio再生開始")
+            with wave.open(playback_file, 'rb') as wf:
+                p = pyaudio.PyAudio()
+                
+                # 利用可能な出力デバイスを確認
+                device_count = p.get_device_count()
+                print(f"[DEBUG] 利用可能デバイス数: {device_count}")
+                
+                # デフォルト出力デバイスを取得
+                try:
+                    default_device_info = p.get_default_output_device_info()
+                    print(f"[DEBUG] デフォルトデバイス: {default_device_info['name']}")
+                except Exception as device_err:
+                    print(f"[DEBUG] デフォルトデバイス取得エラー: {device_err}")
+                    # 最初の利用可能な出力デバイスを探す
+                    output_device_index = None
+                    for i in range(device_count):
+                        try:
+                            device_info = p.get_device_info_by_index(i)
+                            if device_info['maxOutputChannels'] > 0:
+                                output_device_index = i
+                                print(f"[DEBUG] 使用デバイス: {device_info['name']} (index: {i})")
+                                break
+                        except:
+                            continue
+                    
+                    if output_device_index is None:
+                        raise Exception("利用可能な出力デバイスが見つかりません")
+                
+                # オーディオストリーム作成
+                stream_kwargs = {
+                    'format': p.get_format_from_width(wf.getsampwidth()),
+                    'channels': wf.getnchannels(),
+                    'rate': wf.getframerate(),
+                    'output': True,
+                    'frames_per_buffer': 1024
+                }
+                
+                # デバイスが指定されている場合は追加
+                if 'output_device_index' in locals():
+                    stream_kwargs['output_device_index'] = output_device_index
+                
+                stream = p.open(**stream_kwargs)
+                
+                # 音声データを読み込んで再生
+                chunk_size = 1024
                 data = wf.readframes(chunk_size)
+                
+                while data:
+                    stream.write(data)
+                    data = wf.readframes(chunk_size)
+                
+                # リソース解放
+                stream.stop_stream()
+                stream.close()
+                p.terminate()
+                
+            print(f"[DEBUG] PyAudio再生完了")
+            success = True
             
-            # リソース解放
-            stream.stop_stream()
-            stream.close()
-            p.terminate()
+        except Exception as pyaudio_error:
+            print(f"[WARNING] PyAudio再生失敗: {pyaudio_error}")
+            success = False
             
-        print(f"[DEBUG] PyAudio再生完了")
+            # macOSの場合、afplayコマンドで代替再生を試行
+            if platform.system() == "Darwin":  # macOS
+                try:
+                    print(f"[DEBUG] afplayで代替再生を試行")
+                    result = subprocess.run(['afplay', playback_file], 
+                                          capture_output=True, text=True, timeout=30)
+                    if result.returncode == 0:
+                        print(f"[DEBUG] afplay再生成功")
+                        success = True
+                    else:
+                        print(f"[ERROR] afplay再生失敗: {result.stderr}")
+                except Exception as afplay_error:
+                    print(f"[ERROR] afplay実行エラー: {afplay_error}")
             
+            # LinuxやWindowsの場合の代替手段も追加可能
+            if not success:
+                if 'st' in globals():
+                    st.error(f"音声再生エラー: {pyaudio_error}")
+        
         # テンポラリファイルがあれば削除
-        if speed != 1.0 and os.path.exists(temp_path):
+        if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
             
-        return True
+        return success
             
     except Exception as e:
         print(f"[ERROR] Direct audio play error: {e}")
