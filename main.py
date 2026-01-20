@@ -210,10 +210,14 @@ if st.session_state.current_step == "processing" and st.session_state.recorded_a
                 
                 # 最優先でPyAudio直接再生（確実な自動再生）
                 with st.spinner('音声再生中...'):
+                    print(f"[MAIN] 音声再生開始: {audio_output_file_path}")
                     success = ft.play_audio_direct(audio_output_file_path, st.session_state.speed)
+                    print(f"[MAIN] 音声再生結果: {success}")
                     
-                if not success:
-                    st.warning("直接再生に失敗しました。ブラウザ再生を試します...")
+                if success:
+                    st.success("✅ 音声再生完了")
+                else:
+                    st.warning("⚠️ 直接再生に失敗しました。ブラウザ再生を試します...")
                     # エラー時のフォールバック - ブラウザでの再生
                     st.audio(audio_output_file_path, format="audio/wav")
                 

@@ -354,6 +354,7 @@ def play_audio_direct(audio_file_path, speed=1.0):
             
         except Exception as pyaudio_error:
             print(f"[WARNING] PyAudio再生失敗: {pyaudio_error}")
+            print(f"[DEBUG] PyAudioエラー詳細: {type(pyaudio_error).__name__}: {str(pyaudio_error)}")
             success = False
             
             # macOSの場合、afplayコマンドで代替再生を試行
@@ -367,13 +368,16 @@ def play_audio_direct(audio_file_path, speed=1.0):
                         success = True
                     else:
                         print(f"[ERROR] afplay再生失敗: {result.stderr}")
+                        print(f"[ERROR] afplay戻り値: {result.returncode}")
                 except Exception as afplay_error:
                     print(f"[ERROR] afplay実行エラー: {afplay_error}")
             
             # LinuxやWindowsの場合の代替手段も追加可能
             if not success:
+                print(f"[ERROR] 全ての音声再生方法が失敗しました")
                 if 'st' in globals():
                     st.error(f"音声再生エラー: {pyaudio_error}")
+                    st.error("代替再生方法も失敗しました。ブラウザでの再生をお試しください。")
         
         # テンポラリファイルがあれば削除
         if temp_path and os.path.exists(temp_path):
